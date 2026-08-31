@@ -14,6 +14,11 @@ const (
 	MessageConsumed
 )
 
+type sourceNonceKey struct {
+	Source DomainID
+	Nonce  uint64
+}
+
 // CrossDomainMessage is committed by the source domain and consumed exactly once
 // by the destination after settlement finality.
 type CrossDomainMessage struct {
@@ -28,11 +33,15 @@ type CrossDomainMessage struct {
 
 // MessageQueue is a prototype settlement-layer inbox/outbox registry.
 type MessageQueue struct {
-	messages map[[32]byte]CrossDomainMessage
+	messages     map[[32]byte]CrossDomainMessage
+	sourceNonces map[sourceNonceKey][32]byte
 }
 
 func NewMessageQueue() *MessageQueue {
-	return &MessageQueue{messages: make(map[[32]byte]CrossDomainMessage)}
+	return &MessageQueue{
+		messages:     make(map[[32]byte]CrossDomainMessage),
+		sourceNonces: make(map[sourceNonceKey][32]byte),
+	}
 }
 
 func MessageID(source, destination DomainID, nonce uint64, payload []byte) [32]byte {
@@ -49,6 +58,12 @@ func (q *MessageQueue) Submit(source, destination DomainID, nonce uint64, payloa
 	if source == destination {
 		return CrossDomainMessage{}, fmt.Errorf("cross-domain message source and destination must differ")
 	}
+
+	nonceKey := sourceNonceKey{Source: source, Nonce: nonce}
+	if existingID, exists := q.sourceNonces[nonceKey]; exists {
+		return CrossDomainMessage{}, fmt.Errorf("source domain %d nonce %d is already bound to message %x", source, nonce, existingID)
+	}
+
 	id := MessageID(source, destination, nonce, payload)
 	if _, exists := q.messages[id]; exists {
 		return CrossDomainMessage{}, fmt.Errorf("message %x already exists", id)
@@ -62,6 +77,7 @@ func (q *MessageQueue) Submit(source, destination DomainID, nonce uint64, payloa
 		Status:            MessagePending,
 	}
 	q.messages[id] = message
+	q.sourceNonces[nonceKey] = id
 	return message, nil
 }
 

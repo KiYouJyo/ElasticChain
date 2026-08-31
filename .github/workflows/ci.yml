@@ -20,8 +20,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Download modules
-        run: go mod download
+      - name: Resolve module graph
+        run: go mod tidy
       - name: Check formatting
         run: |
           files="$(gofmt -l ./cmd ./internal)"
@@ -47,8 +47,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Download modules
-        run: go mod download
+      - name: Resolve module graph
+        run: go mod tidy
       - name: Build daemon
         run: make build
       - name: Four-validator finality smoke test

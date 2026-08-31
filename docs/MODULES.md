@@ -1,8 +1,21 @@
 # ElasticChain settlement modules
 
-This document fixes the state boundaries for the first ElasticChain-owned Cosmos SDK modules. The deterministic algorithms remain framework-independent in `internal/elastic`; Cosmos keepers must persist and reconstruct that state rather than reimplementing protocol decisions.
+This document fixes the logical state boundaries for ElasticChain-owned settlement modules. The deterministic algorithms remain framework-independent in `internal/elastic`; future Cosmos keepers persist and reconstruct that state rather than reimplementing protocol decisions.
 
-## `x/elastic`
+## v0.1 physical persistence boundary
+
+v0.1 is intentionally transitional. ElasticChain topology and cross-domain message snapshots are stored under a collision-resistant binary namespace inside a Cosmos SDK IAVL store that is mounted from genesis. This guarantees that:
+
+- the state participates in the application AppHash;
+- standard Store-v2 version history survives validator process restart;
+- exported genesis can carry the state into a fresh database;
+- malformed snapshots can fail closed before block execution.
+
+An earlier experiment mounted new `elastic` and `xmsg` IAVL stores after constructing upstream SimApp. Fresh chains could commit those stores, but Store v2 could not reload the late-added store histories after restart. That approach is rejected.
+
+The v0.1 namespace is **not** the final physical schema. Once ElasticChain owns the application wiring rather than composing SimApp, the same logical state will migrate into dedicated stores/modules. The migration must preserve the export representations and invariants below.
+
+## `x/elastic` logical module
 
 ### Responsibility
 
@@ -20,7 +33,7 @@ It does **not** execute application transactions and must never observe process-
 
 ### Canonical logical keys
 
-The first keeper should expose a stable logical schema equivalent to:
+The first dedicated keeper should expose a stable logical schema equivalent to:
 
 ```text
 elastic/params                         -> ScalingPolicy
@@ -38,7 +51,7 @@ Physical key encoding may use Cosmos Collections, but changing encoding requires
 
 No partial topology import is allowed.
 
-## `x/xmsg`
+## `x/xmsg` logical module
 
 ### Responsibility
 
@@ -72,9 +85,9 @@ consume  : FINALIZED -> CONSUMED
 
 ## Transaction boundary
 
-For v0.1 the custom modules should expose only protocol-administration/testnet messages required to exercise state safely. Automatic scaling itself eventually executes at deterministic epoch boundaries from finalized counters, not from arbitrary user transactions.
+For the settlement prototype, public messages should expose only protocol-administration/testnet operations required to exercise state safely. Automatic scaling itself eventually executes at deterministic epoch boundaries from finalized counters, not from arbitrary user transactions.
 
-Candidate v0.1 messages:
+Candidate messages once dedicated modules are wired:
 
 - `MsgSetScalingPolicy` — authority/governance gated;
 - `MsgRecordDomainMetrics` — disabled for public submission in production; test harness or consensus hook only;
@@ -100,22 +113,25 @@ The default scaling policy comes from `internal/elastic.DefaultScalingPolicy()` 
 
 Cross-domain message state is empty at genesis.
 
+The portable application genesis key is currently `app_state.elasticchain`; it carries versioned topology and message snapshots independently of their physical database namespace.
+
 ## Determinism rules
 
 1. Consensus-path arithmetic uses integers only.
 2. Iteration over maps is never serialized directly; canonical exports sort domain IDs and message IDs.
-3. Imported state is validated before keeper writes occur.
-4. Keeper transactions must be atomic: a failed transition leaves both primary and derived indexes unchanged.
+3. Imported state is validated before writes occur.
+4. State transitions must be atomic: a failed transition leaves both primary and derived indexes unchanged.
 5. Any malformed state discovered during export/import or invariant checks is fatal rather than repaired heuristically.
+6. Moving from the v0.1 namespaced store to dedicated stores is a protocol state migration, not a silent database refactor.
 
-## v0.1 acceptance extension
+## Acceptance extension
 
-Before `x/elastic` and `x/xmsg` are considered integrated:
+Before dedicated `x/elastic` and `x/xmsg` stores replace the transitional namespace:
 
 - fresh genesis must reproduce the one-domain reference topology;
-- keeper state must survive process restart;
-- export -> fresh init -> import must reproduce the same snapshots;
+- committed state must survive process restart;
+- export -> clean databases -> fresh InitChain must reproduce valid snapshots;
 - malformed topology import must fail;
 - duplicate source nonce import must fail;
 - consumed messages must remain consumed after restart/import;
-- all four validators must compute identical state roots after the same transition sequence.
+- all four validators must compute identical AppHash/state roots after the same transition sequence.

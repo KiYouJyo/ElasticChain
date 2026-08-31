@@ -90,7 +90,7 @@ func New(
 	upstream := simapp.NewSimApp(logger, db, false, appOpts, baseAppOptions...)
 
 	app := &App{
-		SimApp:  upstream,
+		SimApp:   upstream,
 		stateKey: upstream.GetKey(upgradetypes.StoreKey),
 	}
 	if app.stateKey == nil {

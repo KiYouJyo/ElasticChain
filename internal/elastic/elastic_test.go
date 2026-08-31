@@ -117,6 +117,19 @@ func TestMessageRequiresFinalityAndConsumesExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestMessageRejectsSourceNonceReuse(t *testing.T) {
+	queue := NewMessageQueue()
+	if _, err := queue.Submit(1, 2, 7, []byte("first")); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if _, err := queue.Submit(1, 3, 7, []byte("different payload and destination")); err == nil {
+		t.Fatal("reused source-domain nonce succeeded")
+	}
+	if _, err := queue.Submit(2, 3, 7, []byte("same numeric nonce, different source")); err != nil {
+		t.Fatalf("nonce should be reusable by a different source domain: %v", err)
+	}
+}
+
 func TestMessageIDIsDeterministic(t *testing.T) {
 	first := MessageID(1, 2, 99, []byte("hello"))
 	second := MessageID(1, 2, 99, []byte("hello"))

@@ -1,0 +1,29 @@
+{
+  "network": {
+    "chain_id": "elastic-local-1",
+    "native_denom": "uelastic",
+    "display_denom": "ELASTIC"
+  },
+  "epochs": {
+    "blocks_per_epoch": 100
+  },
+  "elastic_scaling": {
+    "min_domains": 1,
+    "max_domains": 64,
+    "scale_out_utilization_bps": 8000,
+    "scale_in_utilization_bps": 1500,
+    "scale_out_queue_depth": 1000,
+    "scale_out_consecutive_epochs": 100,
+    "scale_in_consecutive_epochs": 500,
+    "topology_transition_delay_epochs": 2,
+    "topology_cooldown_epochs": 20
+  },
+  "cross_domain_messages": {
+    "minimum_settlement_finality_blocks": 2
+  },
+  "notes": [
+    "This is a protocol-parameter example, not a Cosmos SDK genesis.json.",
+    "Consensus-sensitive ratios use integer basis points; do not replace them with floating point values.",
+    "Production parameters require simulation and governance/security review."
+  ]
+}

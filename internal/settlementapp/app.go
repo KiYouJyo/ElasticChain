@@ -15,24 +15,31 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 
 	"github.com/KiYouJyo/ElasticChain/internal/elastic"
 )
 
 const (
-	ElasticStoreKey = "elastic"
-	XMsgStoreKey    = "xmsg"
-	GenesisKey      = "elasticchain"
-	genesisVersion  = uint32(1)
+	GenesisKey     = "elasticchain"
+	genesisVersion = uint32(1)
 )
 
+// v0.1 deliberately stores ElasticChain-owned state under a collision-resistant
+// namespace inside an already versioned Cosmos SDK IAVL store. The previous
+// prototype mounted new stores after SimApp construction; that could commit the
+// first blocks but Store v2 could not reload those late-added stores after a
+// process restart. Using a genesis-mounted host store keeps ElasticChain state
+// in AppHash while we prove lifecycle/export/import semantics. A dedicated
+// x/elastic and x/xmsg store migration belongs to the later owned app wiring.
 var (
-	topologyKey = []byte("topology/v1")
-	messageKey  = []byte("messages/v1")
+	stateNamespace = []byte{0xff, 'e', 'l', 'a', 's', 't', 'i', 'c', 'c', 'h', 'a', 'i', 'n', 0x00}
+	topologyKey    = appendNamespacedKey("topology/v1")
+	messageKey     = appendNamespacedKey("messages/v1")
 )
 
 // GenesisState is the portable JSON boundary for ElasticChain-owned consensus
-// state. The standard Cosmos modules remain in their normal genesis keys.
+// state. Standard Cosmos modules remain in their normal genesis keys.
 type GenesisState struct {
 	Version  uint32                       `json:"version"`
 	Topology elastic.TopologySnapshot     `json:"topology"`
@@ -61,19 +68,18 @@ func (g GenesisState) Validate() error {
 }
 
 // App composes the Cosmos SDK reference settlement application with
-// ElasticChain-owned consensus stores. Standard account, bank, staking and
+// ElasticChain-owned consensus state. Standard account, bank, staking and
 // slashing responsibilities remain upstream while topology and cross-domain
-// messaging become part of ElasticChain's own committed AppHash.
+// messaging are stored under an isolated namespace in committed application
+// state and therefore participate in the same AppHash/finality.
 type App struct {
 	*simapp.SimApp
-	elasticKey *storetypes.KVStoreKey
-	xmsgKey    *storetypes.KVStoreKey
+	stateKey *storetypes.KVStoreKey
 }
 
-// New constructs SimApp without loading the database, mounts ElasticChain's
-// own stores, replaces the relevant lifecycle hooks, and only then loads the
-// latest committed version. BaseApp is sealed by LoadLatestVersion, so this
-// ordering is consensus-critical.
+// New constructs the upstream application without loading the database, swaps
+// in ElasticChain lifecycle hooks, and only then loads the latest committed
+// version. No late-mounted IAVL stores are introduced in v0.1.
 func New(
 	logger log.Logger,
 	db dbm.DB,
@@ -82,13 +88,13 @@ func New(
 	baseAppOptions ...func(*baseapp.BaseApp),
 ) *App {
 	upstream := simapp.NewSimApp(logger, db, false, appOpts, baseAppOptions...)
-	keys := storetypes.NewKVStoreKeys(ElasticStoreKey, XMsgStoreKey)
-	upstream.MountKVStores(keys)
 
 	app := &App{
-		SimApp:     upstream,
-		elasticKey: keys[ElasticStoreKey],
-		xmsgKey:    keys[XMsgStoreKey],
+		SimApp:  upstream,
+		stateKey: upstream.GetKey(upgradetypes.StoreKey),
+	}
+	if app.stateKey == nil {
+		panic("Cosmos SDK upgrade store is unavailable for ElasticChain v0.1 state namespace")
 	}
 	upstream.SetInitChainer(app.InitChainer)
 	upstream.SetBeginBlocker(app.BeginBlocker)
@@ -101,7 +107,7 @@ func New(
 	return app
 }
 
-// InitChainer imports ElasticChain-owned state when the genesis contains it,
+// InitChainer imports ElasticChain-owned state when genesis contains it,
 // otherwise it creates the canonical default root topology and empty queue.
 func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	genesis, found, err := parseGenesis(req.AppStateBytes)
@@ -127,7 +133,7 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 
 // BeginBlocker fails closed if committed ElasticChain state cannot be restored.
 // This continuously validates the persistence boundary, including after a node
-// process restarts and reloads state from disk.
+// process restart and database reload.
 func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
 	if _, err := app.readElasticState(ctx); err != nil {
 		return sdk.BeginBlock{}, err
@@ -174,18 +180,21 @@ func (app *App) writeElasticState(ctx sdk.Context, state GenesisState) error {
 	if err := state.Validate(); err != nil {
 		return err
 	}
-	if err := setJSON(ctx.KVStore(app.elasticKey), topologyKey, state.Topology); err != nil {
+	store := ctx.KVStore(app.stateKey)
+	if err := setJSON(store, topologyKey, state.Topology); err != nil {
 		return fmt.Errorf("write elastic topology: %w", err)
 	}
-	if err := setJSON(ctx.KVStore(app.xmsgKey), messageKey, state.Messages); err != nil {
+	if err := setJSON(store, messageKey, state.Messages); err != nil {
 		return fmt.Errorf("write xmsg queue: %w", err)
 	}
 	return nil
 }
 
 func (app *App) readElasticState(ctx sdk.Context) (GenesisState, error) {
+	store := ctx.KVStore(app.stateKey)
+
 	var topology elastic.TopologySnapshot
-	if err := getJSON(ctx.KVStore(app.elasticKey), topologyKey, &topology); err != nil {
+	if err := getJSON(store, topologyKey, &topology); err != nil {
 		return GenesisState{}, fmt.Errorf("load elastic topology: %w", err)
 	}
 	if _, err := elastic.RestoreTopology(topology); err != nil {
@@ -193,7 +202,7 @@ func (app *App) readElasticState(ctx sdk.Context) (GenesisState, error) {
 	}
 
 	var messages elastic.MessageQueueSnapshot
-	if err := getJSON(ctx.KVStore(app.xmsgKey), messageKey, &messages); err != nil {
+	if err := getJSON(store, messageKey, &messages); err != nil {
 		return GenesisState{}, fmt.Errorf("load xmsg queue: %w", err)
 	}
 	if _, err := elastic.RestoreMessageQueue(messages); err != nil {
@@ -223,6 +232,13 @@ func parseGenesis(appStateBytes []byte) (GenesisState, bool, error) {
 	return state, true, nil
 }
 
+func appendNamespacedKey(suffix string) []byte {
+	key := make([]byte, 0, len(stateNamespace)+len(suffix))
+	key = append(key, stateNamespace...)
+	key = append(key, suffix...)
+	return key
+}
+
 func setJSON(store storetypes.KVStore, key []byte, value any) error {
 	bz, err := json.Marshal(value)
 	if err != nil {
@@ -235,7 +251,7 @@ func setJSON(store storetypes.KVStore, key []byte, value any) error {
 func getJSON(store storetypes.KVStore, key []byte, target any) error {
 	bz := store.Get(key)
 	if len(bz) == 0 {
-		return fmt.Errorf("state key %q is missing", string(key))
+		return fmt.Errorf("state key %x is missing", key)
 	}
 	if err := json.Unmarshal(bz, target); err != nil {
 		return err

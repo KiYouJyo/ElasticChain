@@ -4,8 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${ELASTICCHAIN_LOCALNET_DIR:-$ROOT_DIR/.localnet-smoke}"
 export ELASTICCHAIN_LOCALNET_DIR="$OUT"
+SUCCESS=0
 
 cleanup() {
+  if [[ "$SUCCESS" -ne 1 && -d "$OUT/logs" ]]; then
+    for log in "$OUT"/logs/node*.log; do
+      [[ -f "$log" ]] || continue
+      echo "===== ${log#$ROOT_DIR/} (tail) =====" >&2
+      tail -n 120 "$log" >&2 || true
+    done
+  fi
   bash "$ROOT_DIR/scripts/localnet-stop.sh" || true
   if [[ "${KEEP_LOCALNET:-0}" != "1" ]]; then
     rm -rf "$OUT"
@@ -55,4 +63,5 @@ if len(validators) != 4:
 print("validator set size=4")
 PY
 
+SUCCESS=1
 echo "four-validator PoS/BFT localnet smoke test passed"

@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: elasticchain-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -51,5 +55,5 @@ jobs:
         run: go mod tidy
       - name: Build daemon
         run: make build
-      - name: Four-validator finality smoke test
+      - name: Four-validator restart/export/import smoke test
         run: bash scripts/localnet-smoke.sh

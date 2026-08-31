@@ -1,0 +1,16 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.out
+
+# Local chain state
+/.elasticchain/
+/data/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

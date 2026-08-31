@@ -13,10 +13,10 @@ type DomainID uint32
 // Local mempool size, wall-clock latency, CPU load and similar node-local data
 // must never be used to trigger protocol state transitions.
 type DomainMetrics struct {
-	DomainID             DomainID
-	Epoch                uint64
-	GasUtilizationBps    uint16
-	DAUtilizationBps     uint16
+	DomainID              DomainID
+	Epoch                 uint64
+	GasUtilizationBps     uint16
+	DAUtilizationBps      uint16
 	CrossDomainQueueDepth uint64
 }
 
@@ -33,13 +33,13 @@ func (m DomainMetrics) Validate() error {
 // ScalingPolicy is intended to live in settlement-layer protocol state.
 // All validators must evaluate the same policy against the same finalized data.
 type ScalingPolicy struct {
-	MinDomains                 uint32
-	MaxDomains                 uint32
-	ScaleOutUtilizationBps     uint16
-	ScaleInUtilizationBps      uint16
-	ScaleOutQueueDepth         uint64
-	ScaleOutConsecutiveEpochs  uint32
-	ScaleInConsecutiveEpochs   uint32
+	MinDomains                uint32
+	MaxDomains                uint32
+	ScaleOutUtilizationBps    uint16
+	ScaleInUtilizationBps     uint16
+	ScaleOutQueueDepth        uint64
+	ScaleOutConsecutiveEpochs uint32
+	ScaleInConsecutiveEpochs  uint32
 }
 
 func DefaultScalingPolicy() ScalingPolicy {

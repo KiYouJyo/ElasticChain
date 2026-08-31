@@ -48,7 +48,7 @@ ElasticChain now has two working layers.
 
 `elasticchaind` is based on Cosmos SDK v0.54.4 / CometBFT and can launch a four-validator local network using the test denomination `uelastic`.
 
-The current v0.1 branch is replacing the pure SimApp execution path with an ElasticChain application wrapper that mounts `elastic` and `xmsg` IAVL stores before the database is loaded. These stores are intended to participate in the committed AppHash and be revalidated from disk after validator restart, while standard account, bank, staking, distribution and slashing modules remain maintained upstream.
+The v0.1 application wrapper stores ElasticChain topology/message snapshots in an isolated binary namespace inside a Cosmos IAVL store that exists from genesis. This state participates in the committed AppHash and is validated again during normal block production. The namespace is deliberately transitional: it proves restart and genesis export/import semantics without late-mounting new Store-v2 trees. A later owned application wiring will migrate the same logical state into dedicated `x/elastic` and `x/xmsg` stores.
 
 ## Quick start
 
@@ -66,7 +66,7 @@ The deterministic scaling demo uses short pressure windows and shows:
 1 active domain → split → 2 active domains → merge → 1 active domain
 ```
 
-The localnet smoke test builds the daemon, generates four validator homes, starts all validators, checks shared finality/AppHash, restarts the same node homes and verifies continued block production from persisted state.
+The localnet smoke test builds the daemon, generates four validator homes, starts all validators, checks shared finality/AppHash, restarts the same node homes, exports the chain state to a portable genesis, wipes application/block databases, reboots from that export, and verifies continued shared finality.
 
 See `docs/LOCALNET.md` for manual local-network commands.
 
@@ -80,11 +80,12 @@ scripts/                    four-validator localnet tooling
 config/                     protocol-parameter examples
 docs/ARCHITECTURE.md        system decomposition and scaling model
 docs/PROTOCOL.md            normative protocol invariants
+docs/ASSETS.md              FT/NFT/market asset semantics and invariants
 docs/ROADMAP.md             milestone plan and acceptance gates
 docs/SECURITY.md            threat model and security gates
 docs/DEPENDENCIES.md        framework/version baseline
 docs/LOCALNET.md            local PoS/BFT network instructions
-.github/workflows/ci.yml    core checks + four-validator finality/persistence smoke test
+.github/workflows/ci.yml    core checks + four-validator persistence/export smoke test
 ```
 
 ## Planned milestones

@@ -17,19 +17,27 @@ ElasticChain separates the network into four responsibilities:
 
 The initial implementation deliberately prioritizes correctness and inspectability over headline TPS. Scaling decisions must be reproducible from finalized on-chain state; local mempool observations or machine-specific timing are never consensus inputs.
 
-## Current status — v0.0.1 bootstrap
+## Current status — v0.1 settlement foundation in progress
 
-The repository now contains a dependency-free Go reference prototype for the consensus-sensitive elastic primitives:
+ElasticChain now has two working layers.
 
-- binary-prefix execution-domain topology;
-- deterministic routing;
-- split/merge planning with hysteresis;
+### Deterministic elastic reference core
+
+- binary-prefix execution-domain topology and routing;
+- deterministic split/merge planning with hysteresis;
 - integer basis-point utilization thresholds;
 - finalized cross-domain message lifecycle;
-- exactly-once message consumption;
-- unit tests and CI.
+- destination binding and exactly-once consumption;
+- per-source-domain nonce uniqueness;
+- race-tested unit coverage and scaling demo.
 
-This is **not yet a networked blockchain node**. The next milestone, v0.1, wraps these invariants in a real Cosmos SDK / CometBFT settlement chain.
+### Real PoS/BFT settlement bootstrap
+
+`elasticchaind` now wraps the Cosmos SDK v0.54.4 settlement stack and can launch a four-validator local CometBFT network using the test denomination `uelastic`.
+
+CI verifies that all four validator RPCs reach the same `elastic-local-1` chain at height >= 2 and that the active validator set contains four validators.
+
+The current daemon deliberately reuses Cosmos SDK `simapp` for standard accounts, staking, distribution, slashing and network plumbing. This is a bootstrap boundary, not the final application architecture. The next v0.1 work is to replace that reference wiring with ElasticChain-owned `x/elastic` and `x/xmsg` consensus state while retaining Cosmos SDK / CometBFT as the maintained consensus substrate.
 
 ## Quick start
 
@@ -38,40 +46,38 @@ Requires the Go version declared in `go.mod`.
 ```bash
 make check
 make demo
+make localnet-smoke
 ```
 
-Or directly:
-
-```bash
-go test -race ./...
-go run ./cmd/elasticchaind demo-scaling
-```
-
-The scaling demo intentionally uses very short pressure windows and shows the reference topology moving:
+The deterministic scaling demo uses short pressure windows and shows:
 
 ```text
 1 active domain → split → 2 active domains → merge → 1 active domain
 ```
 
-Production-shaped defaults remain conservative and are recorded in `config/protocol.example.json`.
+The localnet smoke test builds the daemon, generates four validator homes, starts all four validators, waits for shared finality and checks the validator set.
+
+See `docs/LOCALNET.md` for manual local-network commands.
 
 ## Repository map
 
 ```text
-cmd/elasticchaind/          local research CLI
-internal/elastic/           deterministic reference algorithms
+cmd/elasticchaind/          settlement daemon + research commands
+internal/elastic/           deterministic protocol reference algorithms
+scripts/                    four-validator localnet tooling
 config/                     protocol-parameter examples
 docs/ARCHITECTURE.md        system decomposition and scaling model
 docs/PROTOCOL.md            normative protocol invariants
 docs/ROADMAP.md             milestone plan and acceptance gates
 docs/SECURITY.md            threat model and security gates
 docs/DEPENDENCIES.md        framework/version baseline
-.github/workflows/ci.yml    formatting, vet and race-test checks
+docs/LOCALNET.md            local PoS/BFT network instructions
+.github/workflows/ci.yml    core checks + four-validator finality smoke test
 ```
 
 ## Planned milestones
 
-- **v0.1** — settlement-chain foundation, native token, staking, validators, transfers and slashing.
+- **v0.1** — settlement-chain foundation, native token, staking, validators, transfers, slashing and persistent ElasticChain protocol state.
 - **v0.2** — EVM compatibility and standard Ethereum JSON-RPC tooling.
 - **v0.3** — conflict-aware parallel execution within one execution domain.
 - **v0.4** — two execution domains with finalized asynchronous cross-domain messages.
@@ -83,7 +89,7 @@ See `docs/ROADMAP.md` for completion criteria. A milestone is not complete merel
 
 ## Framework direction
 
-The v0.1 settlement layer targets the Cosmos SDK v0.54.x line. The project will follow the CometBFT version pinned by the selected Cosmos SDK release rather than independently upgrading the consensus engine. EVM support is deferred to v0.2 through Cosmos EVM instead of inventing a new VM.
+The v0.1 settlement layer is pinned to Cosmos SDK v0.54.4 and the compatible CometBFT v0.39.4 line selected by that release. EVM support is deferred to v0.2 through Cosmos EVM instead of inventing a new VM.
 
 ## Project maturity
 

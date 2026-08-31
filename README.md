@@ -1,10 +1,12 @@
 # ElasticChain
 
-ElasticChain is an experimental modular Proof-of-Stake blockchain architecture focused on **elastic horizontal scaling with shared security**.
+ElasticChain is an experimental modular Proof-of-Stake blockchain focused on **digital assets, programmable finance, and elastic horizontal scaling with shared security**.
 
-The project explores one central question:
+The product goal is to support useful financial and digital-asset workloads — native assets, fungible tokens, NFTs, marketplaces and programmable contracts — while the protocol research asks:
 
 > Can blockchain execution capacity expand and contract with demand without requiring every validator to execute every transaction?
+
+ElasticChain is intentionally **not** specialized for planning/architecture workloads; domain-specific chains can be built separately. This repository stays focused on general digital-asset and financial execution.
 
 ## Architecture
 
@@ -15,7 +17,17 @@ ElasticChain separates the network into four responsibilities:
 3. **Cross-domain messaging** — domains communicate asynchronously through finalized settlement-layer messages rather than synchronous global state access.
 4. **Proof & data availability** — the prototype begins with explicit commitments and reproducible execution, then evolves toward validity proofs, proof aggregation, erasure coding and data-availability sampling.
 
-The initial implementation deliberately prioritizes correctness and inspectability over headline TPS. Scaling decisions must be reproducible from finalized on-chain state; local mempool observations or machine-specific timing are never consensus inputs.
+The implementation prioritizes correctness and inspectability over headline TPS. Scaling decisions must be reproducible from finalized on-chain state; local mempool observations or machine-specific timing are never consensus inputs.
+
+## Application priorities
+
+1. **Fungible assets** — native asset plus standard token issuance and transfer.
+2. **NFTs / multi-token assets** — ERC-721, ERC-1155, ownership, metadata and batch operations.
+3. **Financial/market workloads** — escrow, auctions, swaps, AMM-style pools and marketplace settlement.
+4. **Developer compatibility** — Ethereum JSON-RPC, MetaMask, Foundry/Hardhat and established contract standards.
+5. **Elastic scaling** — use those real workloads to prove safe parallel and cross-domain execution.
+
+Issuing a token is therefore a first-class use case, but not the only benchmark. NFT ownership, marketplace contention and financial contract state must scale without supply drift, duplication or replay.
 
 ## Current status — v0.1 settlement foundation in progress
 
@@ -29,15 +41,14 @@ ElasticChain now has two working layers.
 - finalized cross-domain message lifecycle;
 - destination binding and exactly-once consumption;
 - per-source-domain nonce uniqueness;
+- versioned deterministic snapshot/restore with fail-closed validation;
 - race-tested unit coverage and scaling demo.
 
 ### Real PoS/BFT settlement bootstrap
 
-`elasticchaind` now wraps the Cosmos SDK v0.54.4 settlement stack and can launch a four-validator local CometBFT network using the test denomination `uelastic`.
+`elasticchaind` is based on Cosmos SDK v0.54.4 / CometBFT and can launch a four-validator local network using the test denomination `uelastic`.
 
-CI verifies that all four validator RPCs reach the same `elastic-local-1` chain at height >= 2 and that the active validator set contains four validators.
-
-The current daemon deliberately reuses Cosmos SDK `simapp` for standard accounts, staking, distribution, slashing and network plumbing. This is a bootstrap boundary, not the final application architecture. The next v0.1 work is to replace that reference wiring with ElasticChain-owned `x/elastic` and `x/xmsg` consensus state while retaining Cosmos SDK / CometBFT as the maintained consensus substrate.
+The current v0.1 branch is replacing the pure SimApp execution path with an ElasticChain application wrapper that mounts `elastic` and `xmsg` IAVL stores before the database is loaded. These stores are intended to participate in the committed AppHash and be revalidated from disk after validator restart, while standard account, bank, staking, distribution and slashing modules remain maintained upstream.
 
 ## Quick start
 
@@ -55,7 +66,7 @@ The deterministic scaling demo uses short pressure windows and shows:
 1 active domain → split → 2 active domains → merge → 1 active domain
 ```
 
-The localnet smoke test builds the daemon, generates four validator homes, starts all four validators, waits for shared finality and checks the validator set.
+The localnet smoke test builds the daemon, generates four validator homes, starts all validators, checks shared finality/AppHash, restarts the same node homes and verifies continued block production from persisted state.
 
 See `docs/LOCALNET.md` for manual local-network commands.
 
@@ -64,6 +75,7 @@ See `docs/LOCALNET.md` for manual local-network commands.
 ```text
 cmd/elasticchaind/          settlement daemon + research commands
 internal/elastic/           deterministic protocol reference algorithms
+internal/settlementapp/     ElasticChain-owned settlement application wiring
 scripts/                    four-validator localnet tooling
 config/                     protocol-parameter examples
 docs/ARCHITECTURE.md        system decomposition and scaling model
@@ -72,24 +84,25 @@ docs/ROADMAP.md             milestone plan and acceptance gates
 docs/SECURITY.md            threat model and security gates
 docs/DEPENDENCIES.md        framework/version baseline
 docs/LOCALNET.md            local PoS/BFT network instructions
-.github/workflows/ci.yml    core checks + four-validator finality smoke test
+.github/workflows/ci.yml    core checks + four-validator finality/persistence smoke test
 ```
 
 ## Planned milestones
 
-- **v0.1** — settlement-chain foundation, native token, staking, validators, transfers, slashing and persistent ElasticChain protocol state.
-- **v0.2** — EVM compatibility and standard Ethereum JSON-RPC tooling.
-- **v0.3** — conflict-aware parallel execution within one execution domain.
-- **v0.4** — two execution domains with finalized asynchronous cross-domain messages.
-- **v0.5** — deterministic split/merge and elastic execution-domain scaling.
-- **v0.6** — validity proofs, recursive aggregation and dedicated data-availability scaling.
-- **v0.7+** — rotating shared-security execution committees, adversarial testnet, audits and economics.
+- **v0.1** — settlement foundation, native asset, staking/validators and persistent ElasticChain consensus state.
+- **v0.2** — digital asset runtime: Cosmos EVM + ERC-20 + ERC-721 + ERC-1155 + standard wallet/tooling compatibility.
+- **v0.3** — financial and marketplace primitives: escrow, NFT sales/auctions, token swaps and AMM reference workloads.
+- **v0.4** — deterministic parallel execution using token/NFT/market workloads.
+- **v0.5** — two execution domains with finalized asynchronous cross-domain asset/state movement.
+- **v0.6** — deterministic split/merge and elastic execution-domain scaling.
+- **v0.7** — validity proofs and dedicated data-availability scaling.
+- **v0.8+** — rotating shared-security committees, adversarial testnet, audits and economics.
 
 See `docs/ROADMAP.md` for completion criteria. A milestone is not complete merely because code exists; its acceptance tests must pass.
 
 ## Framework direction
 
-The v0.1 settlement layer is pinned to Cosmos SDK v0.54.4 and the compatible CometBFT v0.39.4 line selected by that release. EVM support is deferred to v0.2 through Cosmos EVM instead of inventing a new VM.
+The v0.1 settlement layer is pinned to Cosmos SDK v0.54.4 and its compatible CometBFT line. v0.2 uses Cosmos EVM rather than inventing a new VM so established asset standards and tooling arrive before protocol-specific application abstractions.
 
 ## Project maturity
 

@@ -3,90 +3,48 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"github.com/KiYouJyo/ElasticChain/internal/elastic"
+	"cosmossdk.io/simapp"
+	simdcmd "cosmossdk.io/simapp/simd/cmd"
+
+	"github.com/cosmos/cosmos-sdk/server"
+	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
 )
 
-const version = "0.0.1-dev"
+const version = "0.1.0-dev"
 
 func main() {
-	if len(os.Args) < 2 {
-		printHelp()
-		return
-	}
-
-	switch os.Args[1] {
-	case "version":
-		fmt.Println(version)
-	case "demo-scaling":
-		if err := demoScaling(); err != nil {
-			fmt.Fprintln(os.Stderr, "demo failed:", err)
-			os.Exit(1)
-		}
-	default:
-		printHelp()
-	}
-}
-
-func printHelp() {
-	fmt.Printf(`ElasticChain %s
-
-Research prototype commands:
-  elasticchaind version       print prototype version
-  elasticchaind demo-scaling  run a deterministic split/merge demonstration
-`, version)
-}
-
-func demoScaling() error {
-	policy := elastic.DefaultScalingPolicy()
-	policy.ScaleOutConsecutiveEpochs = 2
-	policy.ScaleInConsecutiveEpochs = 2
-	policy.MaxDomains = 4
-
-	planner, err := elastic.NewPlanner(policy)
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
-	}
-	topology := elastic.NewTopology()
-
-	fmt.Println("epoch 0 active domains:", topology.ActiveDomains())
-
-	for epoch := uint64(1); epoch <= 2; epoch++ {
-		actions, err := planner.Plan(topology, []elastic.DomainMetrics{{
-			DomainID: 0, Epoch: epoch, GasUtilizationBps: 9_000, DAUtilizationBps: 2_000,
-		}})
-		if err != nil {
-			return err
-		}
-		if len(actions) > 0 {
-			fmt.Printf("epoch %d actions: %v\n", epoch, actions)
-			if err := planner.Apply(topology, actions); err != nil {
-				return err
-			}
-		}
+		fmt.Fprintln(os.Stderr, "resolve home directory:", err)
+		os.Exit(1)
 	}
 
-	fmt.Println("after scale-out active domains:", topology.ActiveDomains())
-	active := topology.ActiveDomains()
-	for epoch := uint64(3); epoch <= 4; epoch++ {
-		metrics := make([]elastic.DomainMetrics, 0, len(active))
-		for _, id := range active {
-			metrics = append(metrics, elastic.DomainMetrics{
-				DomainID: id, Epoch: epoch, GasUtilizationBps: 500, DAUtilizationBps: 500,
-			})
-		}
-		actions, err := planner.Plan(topology, metrics)
-		if err != nil {
-			return err
-		}
-		if len(actions) > 0 {
-			fmt.Printf("epoch %d actions: %v\n", epoch, actions)
-			if err := planner.Apply(topology, actions); err != nil {
-				return err
-			}
+	simapp.DefaultNodeHome = filepath.Join(home, ".elasticchain")
+
+	rootCmd := simdcmd.NewRootCmd()
+	rootCmd.Use = "elasticchaind"
+	rootCmd.Short = "ElasticChain experimental PoS settlement daemon"
+	rootCmd.Long = "ElasticChain experimental PoS/BFT settlement daemon. Research software; do not secure real value with this build."
+	rootCmd.Version = version
+	rootCmd.AddCommand(newDemoScalingCmd())
+
+	// Keep the mature upstream account/genesis/staking CLI, but replace commands
+	// that instantiate the application. Both running and exporting must use the
+	// ElasticChain wrapper or the elastic/xmsg stores would be omitted.
+	for _, child := range rootCmd.Commands() {
+		if child.Name() == "start" || child.Name() == "export" {
+			rootCmd.RemoveCommand(child)
 		}
 	}
+	rootCmd.AddCommand(
+		server.StartCmdWithOptions(newSettlementApp, simapp.DefaultNodeHome, server.StartCmdOptions{}),
+		server.ExportCmd(exportSettlementApp, simapp.DefaultNodeHome),
+	)
 
-	fmt.Println("after scale-in active domains:", topology.ActiveDomains())
-	return nil
+	if err := svrcmd.Execute(rootCmd, "ELASTICCHAIN", simapp.DefaultNodeHome); err != nil {
+		fmt.Fprintln(rootCmd.OutOrStderr(), err)
+		os.Exit(1)
+	}
 }

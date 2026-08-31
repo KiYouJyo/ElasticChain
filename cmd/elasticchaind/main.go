@@ -5,17 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	dbm "github.com/cosmos/cosmos-db"
-
-	"cosmossdk.io/log/v2"
 	"cosmossdk.io/simapp"
 	simdcmd "cosmossdk.io/simapp/simd/cmd"
 
 	"github.com/cosmos/cosmos-sdk/server"
 	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
-	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-
-	"github.com/KiYouJyo/ElasticChain/internal/settlementapp"
 )
 
 const version = "0.1.0-dev"
@@ -36,28 +30,18 @@ func main() {
 	rootCmd.Version = version
 	rootCmd.AddCommand(newDemoScalingCmd())
 
-	// The upstream CLI is retained for mature account/genesis/staking commands,
-	// but node execution must use ElasticChain's application wrapper so the
-	// elastic and xmsg stores are mounted before the database is loaded.
+	// Keep the mature upstream account/genesis/staking CLI, but replace commands
+	// that instantiate the application. Both running and exporting must use the
+	// ElasticChain wrapper or the elastic/xmsg stores would be omitted.
 	for _, child := range rootCmd.Commands() {
-		if child.Name() == "start" {
+		if child.Name() == "start" || child.Name() == "export" {
 			rootCmd.RemoveCommand(child)
-			break
 		}
 	}
-	rootCmd.AddCommand(server.StartCmdWithOptions(
-		func(logger log.Logger, db dbm.DB, appOpts servertypes.AppOptions) servertypes.Application {
-			return settlementapp.New(
-				logger,
-				db,
-				true,
-				appOpts,
-				server.DefaultBaseappOptions(appOpts)...,
-			)
-		},
-		simapp.DefaultNodeHome,
-		server.StartCmdOptions{},
-	))
+	rootCmd.AddCommand(
+		server.StartCmdWithOptions(newSettlementApp, simapp.DefaultNodeHome, server.StartCmdOptions{}),
+		server.ExportCmd(exportSettlementApp, simapp.DefaultNodeHome),
+	)
 
 	if err := svrcmd.Execute(rootCmd, "ELASTICCHAIN", simapp.DefaultNodeHome); err != nil {
 		fmt.Fprintln(rootCmd.OutOrStderr(), err)

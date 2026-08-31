@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
 
 	"cosmossdk.io/log/v2"
@@ -21,12 +22,43 @@ import (
 const (
 	ElasticStoreKey = "elastic"
 	XMsgStoreKey    = "xmsg"
+	GenesisKey      = "elasticchain"
+	genesisVersion  = uint32(1)
 )
 
 var (
 	topologyKey = []byte("topology/v1")
 	messageKey  = []byte("messages/v1")
 )
+
+// GenesisState is the portable JSON boundary for ElasticChain-owned consensus
+// state. The standard Cosmos modules remain in their normal genesis keys.
+type GenesisState struct {
+	Version  uint32                       `json:"version"`
+	Topology elastic.TopologySnapshot     `json:"topology"`
+	Messages elastic.MessageQueueSnapshot `json:"messages"`
+}
+
+func DefaultGenesisState() GenesisState {
+	return GenesisState{
+		Version:  genesisVersion,
+		Topology: elastic.NewTopology().Snapshot(),
+		Messages: elastic.NewMessageQueue().Snapshot(),
+	}
+}
+
+func (g GenesisState) Validate() error {
+	if g.Version != genesisVersion {
+		return fmt.Errorf("unsupported ElasticChain genesis version %d", g.Version)
+	}
+	if err := g.Topology.Validate(); err != nil {
+		return fmt.Errorf("invalid topology: %w", err)
+	}
+	if err := g.Messages.Validate(); err != nil {
+		return fmt.Errorf("invalid message queue: %w", err)
+	}
+	return nil
+}
 
 // App composes the Cosmos SDK reference settlement application with
 // ElasticChain-owned consensus stores. Standard account, bank, staking and
@@ -69,14 +101,25 @@ func New(
 	return app
 }
 
-// InitChainer initializes ElasticChain-owned state after the standard Cosmos
-// modules have initialized their genesis state.
+// InitChainer imports ElasticChain-owned state when the genesis contains it,
+// otherwise it creates the canonical default root topology and empty queue.
 func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+	genesis, found, err := parseGenesis(req.AppStateBytes)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		genesis = DefaultGenesisState()
+	}
+	if err := genesis.Validate(); err != nil {
+		return nil, fmt.Errorf("validate ElasticChain genesis: %w", err)
+	}
+
 	resp, err := app.SimApp.InitChainer(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	if err := app.initializeElasticState(ctx); err != nil {
+	if err := app.writeElasticState(ctx, genesis); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -86,42 +129,98 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 // This continuously validates the persistence boundary, including after a node
 // process restarts and reloads state from disk.
 func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
-	if err := app.validateElasticState(ctx); err != nil {
+	if _, err := app.readElasticState(ctx); err != nil {
 		return sdk.BeginBlock{}, err
 	}
 	return app.SimApp.BeginBlocker(ctx)
 }
 
-func (app *App) initializeElasticState(ctx sdk.Context) error {
-	topology := elastic.NewTopology().Snapshot()
-	messages := elastic.NewMessageQueue().Snapshot()
-
-	if err := setJSON(ctx.KVStore(app.elasticKey), topologyKey, topology); err != nil {
-		return fmt.Errorf("initialize elastic topology: %w", err)
+// ExportAppStateAndValidators extends the standard Cosmos module export with
+// ElasticChain's own topology/message state so a fresh network can reconstruct
+// the same consensus state from the exported genesis document.
+func (app *App) ExportAppStateAndValidators(
+	forZeroHeight bool,
+	jailAllowedAddrs,
+	modulesToExport []string,
+) (servertypes.ExportedApp, error) {
+	exported, err := app.SimApp.ExportAppStateAndValidators(forZeroHeight, jailAllowedAddrs, modulesToExport)
+	if err != nil {
+		return servertypes.ExportedApp{}, err
 	}
-	if err := setJSON(ctx.KVStore(app.xmsgKey), messageKey, messages); err != nil {
-		return fmt.Errorf("initialize xmsg queue: %w", err)
+
+	ctx := app.NewContextLegacy(true, cmtproto.Header{Height: app.LastBlockHeight()})
+	elasticGenesis, err := app.readElasticState(ctx)
+	if err != nil {
+		return servertypes.ExportedApp{}, fmt.Errorf("export ElasticChain state: %w", err)
+	}
+
+	var appState map[string]json.RawMessage
+	if err := json.Unmarshal(exported.AppState, &appState); err != nil {
+		return servertypes.ExportedApp{}, fmt.Errorf("decode upstream app state: %w", err)
+	}
+	bz, err := json.Marshal(elasticGenesis)
+	if err != nil {
+		return servertypes.ExportedApp{}, fmt.Errorf("encode ElasticChain genesis: %w", err)
+	}
+	appState[GenesisKey] = bz
+	exported.AppState, err = json.MarshalIndent(appState, "", "  ")
+	if err != nil {
+		return servertypes.ExportedApp{}, fmt.Errorf("encode exported app state: %w", err)
+	}
+	return exported, nil
+}
+
+func (app *App) writeElasticState(ctx sdk.Context, state GenesisState) error {
+	if err := state.Validate(); err != nil {
+		return err
+	}
+	if err := setJSON(ctx.KVStore(app.elasticKey), topologyKey, state.Topology); err != nil {
+		return fmt.Errorf("write elastic topology: %w", err)
+	}
+	if err := setJSON(ctx.KVStore(app.xmsgKey), messageKey, state.Messages); err != nil {
+		return fmt.Errorf("write xmsg queue: %w", err)
 	}
 	return nil
 }
 
-func (app *App) validateElasticState(ctx sdk.Context) error {
+func (app *App) readElasticState(ctx sdk.Context) (GenesisState, error) {
 	var topology elastic.TopologySnapshot
 	if err := getJSON(ctx.KVStore(app.elasticKey), topologyKey, &topology); err != nil {
-		return fmt.Errorf("load elastic topology: %w", err)
+		return GenesisState{}, fmt.Errorf("load elastic topology: %w", err)
 	}
 	if _, err := elastic.RestoreTopology(topology); err != nil {
-		return fmt.Errorf("restore elastic topology: %w", err)
+		return GenesisState{}, fmt.Errorf("restore elastic topology: %w", err)
 	}
 
 	var messages elastic.MessageQueueSnapshot
 	if err := getJSON(ctx.KVStore(app.xmsgKey), messageKey, &messages); err != nil {
-		return fmt.Errorf("load xmsg queue: %w", err)
+		return GenesisState{}, fmt.Errorf("load xmsg queue: %w", err)
 	}
 	if _, err := elastic.RestoreMessageQueue(messages); err != nil {
-		return fmt.Errorf("restore xmsg queue: %w", err)
+		return GenesisState{}, fmt.Errorf("restore xmsg queue: %w", err)
 	}
-	return nil
+
+	state := GenesisState{Version: genesisVersion, Topology: topology, Messages: messages}
+	if err := state.Validate(); err != nil {
+		return GenesisState{}, err
+	}
+	return state, nil
+}
+
+func parseGenesis(appStateBytes []byte) (GenesisState, bool, error) {
+	var appState map[string]json.RawMessage
+	if err := json.Unmarshal(appStateBytes, &appState); err != nil {
+		return GenesisState{}, false, fmt.Errorf("decode application genesis: %w", err)
+	}
+	raw, found := appState[GenesisKey]
+	if !found {
+		return GenesisState{}, false, nil
+	}
+	var state GenesisState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return GenesisState{}, false, fmt.Errorf("decode ElasticChain genesis: %w", err)
+	}
+	return state, true, nil
 }
 
 func setJSON(store storetypes.KVStore, key []byte, value any) error {

@@ -17,13 +17,13 @@ const (
 // CrossDomainMessage is committed by the source domain and consumed exactly once
 // by the destination after settlement finality.
 type CrossDomainMessage struct {
-	ID               [32]byte
-	SourceDomain     DomainID
+	ID                [32]byte
+	SourceDomain      DomainID
 	DestinationDomain DomainID
-	Nonce            uint64
-	PayloadHash      [32]byte
-	SettlementHeight uint64
-	Status           MessageStatus
+	Nonce             uint64
+	PayloadHash       [32]byte
+	SettlementHeight  uint64
+	Status            MessageStatus
 }
 
 // MessageQueue is a prototype settlement-layer inbox/outbox registry.

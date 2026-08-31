@@ -6,15 +6,15 @@ OUT="${ELASTICCHAIN_LOCALNET_DIR:-$ROOT_DIR/.localnet-smoke}"
 export ELASTICCHAIN_LOCALNET_DIR="$OUT"
 
 cleanup() {
-  "$ROOT_DIR/scripts/localnet-stop.sh" || true
+  bash "$ROOT_DIR/scripts/localnet-stop.sh" || true
   if [[ "${KEEP_LOCALNET:-0}" != "1" ]]; then
     rm -rf "$OUT"
   fi
 }
 trap cleanup EXIT
 
-"$ROOT_DIR/scripts/localnet-init.sh"
-"$ROOT_DIR/scripts/localnet-start.sh"
+bash "$ROOT_DIR/scripts/localnet-init.sh"
+bash "$ROOT_DIR/scripts/localnet-start.sh"
 
 python3 - <<'PY'
 import json

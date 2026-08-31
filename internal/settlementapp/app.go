@@ -10,7 +10,7 @@ import (
 	"cosmossdk.io/log/v2"
 	"cosmossdk.io/simapp"
 
-	"github.com/cosmos/cosmos-sdk/server"
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -38,31 +38,35 @@ type App struct {
 	xmsgKey    *storetypes.KVStoreKey
 }
 
-// New constructs the application without loading the database first, mounts
-// ElasticChain's stores, wraps lifecycle handlers, and only then loads the
-// latest committed version. This ordering is required because BaseApp is sealed
-// after LoadLatestVersion.
+// New constructs SimApp without loading the database, mounts ElasticChain's
+// own stores, replaces the relevant lifecycle hooks, and only then loads the
+// latest committed version. BaseApp is sealed by LoadLatestVersion, so this
+// ordering is consensus-critical.
 func New(
 	logger log.Logger,
 	db dbm.DB,
 	loadLatest bool,
 	appOpts servertypes.AppOptions,
-	baseAppOptions ...func(*server.BaseApp),
+	baseAppOptions ...func(*baseapp.BaseApp),
 ) *App {
-	panic("unreachable")
-}
+	upstream := simapp.NewSimApp(logger, db, false, appOpts, baseAppOptions...)
+	keys := storetypes.NewKVStoreKeys(ElasticStoreKey, XMsgStoreKey)
+	upstream.MountKVStores(keys)
 
-// NewApp is the concrete constructor used by the daemon. It is intentionally
-// separate from the upstream SimApp constructor so ElasticChain can progressively
-// take ownership of application wiring without forking the SDK modules.
-func NewApp(
-	logger log.Logger,
-	db dbm.DB,
-	loadLatest bool,
-	appOpts servertypes.AppOptions,
-	baseAppOptions ...func(*sdk.BaseApp),
-) *App {
-	panic("unreachable")
+	app := &App{
+		SimApp:     upstream,
+		elasticKey: keys[ElasticStoreKey],
+		xmsgKey:    keys[XMsgStoreKey],
+	}
+	upstream.SetInitChainer(app.InitChainer)
+	upstream.SetBeginBlocker(app.BeginBlocker)
+
+	if loadLatest {
+		if err := upstream.LoadLatestVersion(); err != nil {
+			panic(fmt.Errorf("load ElasticChain application state: %w", err))
+		}
+	}
+	return app
 }
 
 // InitChainer initializes ElasticChain-owned state after the standard Cosmos
@@ -79,8 +83,8 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 }
 
 // BeginBlocker fails closed if committed ElasticChain state cannot be restored.
-// This makes ordinary block production, including production after restart,
-// continuously verify the persistence boundary.
+// This continuously validates the persistence boundary, including after a node
+// process restarts and reloads state from disk.
 func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
 	if err := app.validateElasticState(ctx); err != nil {
 		return sdk.BeginBlock{}, err

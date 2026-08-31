@@ -39,14 +39,7 @@ func TestParseGenesisRoundTrip(t *testing.T) {
 }
 
 func TestParseGenesisAllowsLegacyGenesisWithoutElasticState(t *testing.T) {
-	state, found, err := parseGenesis([]byte(`{"bank":{}}`))
-	if err == nil {
-		t.Fatal("expected intentionally malformed escaped fixture to be rejected")
-	}
-	_ = state
-	_ = found
-
-	state, found, err = parseGenesis([]byte("{\"bank\":{}}"))
+	state, found, err := parseGenesis([]byte("{\"bank\":{}}"))
 	if err != nil {
 		t.Fatalf("parse legacy genesis: %v", err)
 	}

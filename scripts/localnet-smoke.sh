@@ -41,10 +41,7 @@ while time.time() < deadline:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=2) as response:
                 payload = json.load(response)
             result = payload["result"]
-            height = int(result["sync_info"]["latest_block_height"])
-            chain_id = result["node_info"]["network"]
-            statuses.append((port, chain_id, height))
-
+            statuses.append((port, result["node_info"]["network"], int(result["sync_info"]["latest_block_height"])))
         if all(chain_id == "elastic-local-1" for _, chain_id, _ in statuses) and min(height for _, _, height in statuses) >= 2:
             break
     except (OSError, KeyError, ValueError, urllib.error.URLError) as exc:
@@ -61,7 +58,56 @@ with urllib.request.urlopen("http://127.0.0.1:26657/validators?per_page=100", ti
 if len(validators) != 4:
     raise SystemExit(f"expected 4 validators, got {len(validators)}")
 print("validator set size=4")
+
+app_hashes = []
+for port in ports:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/commit?height=2", timeout=3) as response:
+        commit = json.load(response)["result"]
+    app_hashes.append(commit["signed_header"]["header"]["app_hash"])
+if len(set(app_hashes)) != 1:
+    raise SystemExit(f"validators disagree on height-2 AppHash: {app_hashes}")
+print(f"height=2 shared_app_hash={app_hashes[0]}")
+PY
+
+# Restart the exact same node homes. InitChain does not run again; successful
+# block production therefore proves that elastic/xmsg state was loaded from the
+# committed IAVL stores and passed BeginBlock restore/validation.
+bash "$ROOT_DIR/scripts/localnet-stop.sh"
+bash "$ROOT_DIR/scripts/localnet-start.sh"
+
+python3 - <<'PY'
+import json
+import time
+import urllib.error
+import urllib.request
+
+ports = [26657, 26658, 26659, 26660]
+deadline = time.time() + 90
+last_error = None
+
+while time.time() < deadline:
+    try:
+        heights = []
+        for port in ports:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=2) as response:
+                heights.append(int(json.load(response)["result"]["sync_info"]["latest_block_height"]))
+        if min(heights) >= 4:
+            break
+    except (OSError, KeyError, ValueError, urllib.error.URLError) as exc:
+        last_error = exc
+    time.sleep(1)
+else:
+    raise SystemExit(f"restarted localnet did not reach height 4: {last_error}")
+
+app_hashes = []
+for port in ports:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/commit?height=3", timeout=3) as response:
+        commit = json.load(response)["result"]
+    app_hashes.append(commit["signed_header"]["header"]["app_hash"])
+if len(set(app_hashes)) != 1:
+    raise SystemExit(f"validators disagree after restart at height 3: {app_hashes}")
+print(f"restart persistence verified; height=3 shared_app_hash={app_hashes[0]}")
 PY
 
 SUCCESS=1
-echo "four-validator PoS/BFT localnet smoke test passed"
+echo "four-validator ElasticApp persistence/finality smoke test passed"

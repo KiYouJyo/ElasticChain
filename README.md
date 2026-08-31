@@ -6,7 +6,7 @@ The project explores one central question:
 
 > Can blockchain execution capacity expand and contract with demand without requiring every validator to execute every transaction?
 
-## Design direction
+## Architecture
 
 ElasticChain separates the network into four responsibilities:
 
@@ -17,9 +17,57 @@ ElasticChain separates the network into four responsibilities:
 
 The initial implementation deliberately prioritizes correctness and inspectability over headline TPS. Scaling decisions must be reproducible from finalized on-chain state; local mempool observations or machine-specific timing are never consensus inputs.
 
-## Status
+## Current status — v0.0.1 bootstrap
 
-Repository bootstrap in progress. The first milestone is a deterministic local prototype and protocol specification, followed by a Cosmos SDK / CometBFT settlement chain.
+The repository now contains a dependency-free Go reference prototype for the consensus-sensitive elastic primitives:
+
+- binary-prefix execution-domain topology;
+- deterministic routing;
+- split/merge planning with hysteresis;
+- integer basis-point utilization thresholds;
+- finalized cross-domain message lifecycle;
+- exactly-once message consumption;
+- unit tests and CI.
+
+This is **not yet a networked blockchain node**. The next milestone, v0.1, wraps these invariants in a real Cosmos SDK / CometBFT settlement chain.
+
+## Quick start
+
+Requires the Go version declared in `go.mod`.
+
+```bash
+make check
+make demo
+```
+
+Or directly:
+
+```bash
+go test -race ./...
+go run ./cmd/elasticchaind demo-scaling
+```
+
+The scaling demo intentionally uses very short pressure windows and shows the reference topology moving:
+
+```text
+1 active domain → split → 2 active domains → merge → 1 active domain
+```
+
+Production-shaped defaults remain conservative and are recorded in `config/protocol.example.json`.
+
+## Repository map
+
+```text
+cmd/elasticchaind/          local research CLI
+internal/elastic/           deterministic reference algorithms
+config/                     protocol-parameter examples
+docs/ARCHITECTURE.md        system decomposition and scaling model
+docs/PROTOCOL.md            normative protocol invariants
+docs/ROADMAP.md             milestone plan and acceptance gates
+docs/SECURITY.md            threat model and security gates
+docs/DEPENDENCIES.md        framework/version baseline
+.github/workflows/ci.yml    formatting, vet and race-test checks
+```
 
 ## Planned milestones
 
@@ -29,8 +77,13 @@ Repository bootstrap in progress. The first milestone is a deterministic local p
 - **v0.4** — two execution domains with finalized asynchronous cross-domain messages.
 - **v0.5** — deterministic split/merge and elastic execution-domain scaling.
 - **v0.6** — validity proofs, recursive aggregation and dedicated data-availability scaling.
+- **v0.7+** — rotating shared-security execution committees, adversarial testnet, audits and economics.
 
-See `docs/ARCHITECTURE.md`, `docs/PROTOCOL.md`, and `docs/ROADMAP.md` for the normative project direction once the bootstrap PR lands.
+See `docs/ROADMAP.md` for completion criteria. A milestone is not complete merely because code exists; its acceptance tests must pass.
+
+## Framework direction
+
+The v0.1 settlement layer targets the Cosmos SDK v0.54.x line. The project will follow the CometBFT version pinned by the selected Cosmos SDK release rather than independently upgrading the consensus engine. EVM support is deferred to v0.2 through Cosmos EVM instead of inventing a new VM.
 
 ## Project maturity
 
